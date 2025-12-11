@@ -1,0 +1,146 @@
+// ==========================================
+// Part 1: Lexical Rules (词法规则)
+// ==========================================
+
+while           WHILE
+if              IF
+else            ELSE
+print           PRINT
+[0-9]+          NUM
+[a-zA-Z_]+      ID
+\+              PLUS
+\-              MINUS
+\* MUL
+\/              DIV
+=               ASSIGN
+==              EQ
+<               LT
+>               GT
+\(              LPAREN
+\)              RPAREN
+\{              LBRACE
+\}              RBRACE
+;               SEMI
+[ \t\n\r]+      SKIP   // 忽略空白符
+
+%%
+
+// ==========================================
+// Part 2: Syntax Rules (语法规则)
+// ==========================================
+
+// 程序由一系列语句组成
+program : stmt_list { 
+    printf("Program Parsing Finished.\n"); 
+}
+
+stmt_list : stmt_list stmt { 
+    // 列表递归
+}
+stmt_list : stmt { 
+    // 单条语句
+}
+
+// === 语句 (Statement) ===
+
+// 1. 赋值语句: a = b + 1;
+stmt : ID ASSIGN expr SEMI { 
+    // 生成: a = t1
+    std::cout << $1.text << " = " << $3.temp << std::endl; 
+}
+
+// 2. 块语句: { stmt ... }
+stmt : LBRACE stmt_list RBRACE { 
+    // 块结构通常不需要生成特殊的中间代码，除非涉及作用域
+}
+
+// 3. While 循环: while (a < 10) { ... }
+// 逻辑: 
+// L_start:
+//    if (cond == false) goto L_end
+//    stmt
+//    goto L_start
+// L_end:
+stmt : WHILE LPAREN bool_expr RPAREN stmt { 
+    std::string L_start = newLabel();
+    std::string L_end = newLabel();
+    
+    // 输出伪代码逻辑 (实际实现时，L_start应该在bool_expr之前生成并打印)
+    std::cout << "LABEL " << L_start << ":" << std::endl;
+    std::cout << "IF " << $3.temp << " == false GOTO " << L_end << std::endl;
+    // (stmt 的代码会在这里被递归打印)
+    std::cout << "GOTO " << L_start << std::endl;
+    std::cout << "LABEL " << L_end << ":" << std::endl;
+}
+
+// 4. If-Else 分支
+// 注意: 这里是最简单的写法，存在"悬挂else"歧义，但在LR分析中通常默认移进解决
+stmt : IF LPAREN bool_expr RPAREN stmt ELSE stmt { 
+    std::string L_else = newLabel();
+    std::string L_end = newLabel();
+
+    std::cout << "IF " << $3.temp << " == false GOTO " << L_else << std::endl;
+    // (stmt1 代码)
+    std::cout << "GOTO " << L_end << std::endl;
+    std::cout << "LABEL " << L_else << ":" << std::endl;
+    // (stmt2 代码)
+    std::cout << "LABEL " << L_end << ":" << std::endl;
+}
+
+stmt : IF LPAREN bool_expr RPAREN stmt { 
+    std::string L_end = newLabel();
+    std::cout << "IF " << $3.temp << " == false GOTO " << L_end << std::endl;
+    // (stmt 代码)
+    std::cout << "LABEL " << L_end << ":" << std::endl;
+}
+
+// === 布尔表达式 (Boolean Expression) ===
+// 用于 if 和 while 的条件判断
+bool_expr : expr LT expr { 
+    $$ = newTemp();
+    std::cout << $$ << " = " << $1.temp << " < " << $3.temp << std::endl;
+}
+bool_expr : expr GT expr { 
+    $$ = newTemp();
+    std::cout << $$ << " = " << $1.temp << " > " << $3.temp << std::endl;
+}
+bool_expr : expr EQ expr { 
+    $$ = newTemp();
+    std::cout << $$ << " = " << $1.temp << " == " << $3.temp << std::endl;
+}
+
+// === 算术表达式 (Arithmetic Expression) ===
+
+expr : expr PLUS term { 
+    $$ = newTemp(); 
+    std::cout << $$ << " = " << $1.temp << " + " << $3.temp << std::endl;
+}
+expr : expr MINUS term { 
+    $$ = newTemp(); 
+    std::cout << $$ << " = " << $1.temp << " - " << $3.temp << std::endl;
+}
+expr : term { 
+    $$ = $1; 
+}
+
+term : term MUL factor { 
+    $$ = newTemp(); 
+    std::cout << $$ << " = " << $1.temp << " * " << $3.temp << std::endl;
+}
+term : term DIV factor { 
+    $$ = newTemp(); 
+    std::cout << $$ << " = " << $1.temp << " / " << $3.temp << std::endl;
+}
+term : factor { 
+    $$ = $1; 
+}
+
+factor : LPAREN expr RPAREN { 
+    $$ = $2; 
+}
+factor : ID { 
+    $$.temp = $1.text; // 如果是变量，直接用变量名
+}
+factor : NUM { 
+    $$.temp = $1.text; // 如果是数字，直接用数字字符串
+}
