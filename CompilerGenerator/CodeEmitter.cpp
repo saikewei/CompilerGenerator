@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CodeEmitter.h"
+#include "Templates.h"
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -22,11 +23,38 @@ static bool is_space(char c) {
     return std::isspace(static_cast<unsigned char>(c));
 }
 
+static std::string replaceAll(std::string str, const std::string& from, const std::string& to) {
+    size_t start_pos = 0;
+    while ((start_pos = str.find(from, start_pos)) != std::string::npos) {
+        str.replace(start_pos, from.length(), to);
+        start_pos += to.length();
+    }
+    return str;
+}
+
 // ==========================================
 // CodeEmitter 类实现
 // ==========================================
 
-CodeEmitter::CodeEmitter() {}
+CodeEmitter::CodeEmitter(): outputDir(nullptr) {}
+
+CodeEmitter::CodeEmitter(const std::string& dir)
+{
+    if (dir.empty()) {
+        outputDir = nullptr;
+		std::cout << "[CodeEmitter] No output directory specified, using current directory." << std::endl;
+        return;
+	}
+
+	outputDir = new std::string(dir);
+}
+
+CodeEmitter::~CodeEmitter()
+{
+    if (outputDir != nullptr) {
+        delete outputDir;
+    }
+}
 
 bool CodeEmitter::parseInputFile(const std::string& filepath,
     std::vector<TokenDefinition>& outTokens,
@@ -159,9 +187,72 @@ bool CodeEmitter::parseInputFile(const std::string& filepath,
     return true;
 }
 
+bool CodeEmitter::generateHeader(const std::string& headerFilename = "lexer.h") {
+	if (headerFilename.empty()) return false;
+    std::ofstream hFile(outputDir != nullptr ? *outputDir + "/" + headerFilename : headerFilename);
+    if (!hFile.is_open()) return false;
+    hFile << TEMPLATE_LEXER_H;
+    hFile.close();
+
+    std::cout << "[CodeEmitter] Generated header: " << headerFilename << std::endl;
+	return true;
+}
+
 // 占位符函数，防止编译报错，后续再实现
 bool CodeEmitter::emitLexer(const std::string& filename, const DFATable& dfa) {
-    std::cout << "[CodeEmitter] Generating Lexer to " << filename << " (TODO)" << std::endl;
+    if (!generateHeader()) {
+		std::cerr << "[CodeEmitter] Failed to generate header file." << std::endl;
+        return false;
+    }
+
+    std::stringstream ssSwitch;
+    std::stringstream ssFinal;
+
+    for (const auto& row : dfa) {
+        // --- 生成 Switch 部分 ---
+        ssSwitch << "            case " << row.stateID << ":\n";
+        bool first = true;
+        for (auto const& pair : row.transitions) {
+            char key = pair.first;   // 获取字符
+            int target = pair.second; // 获取目标状态
+            if (first) { 
+                ssSwitch << "                if "; 
+                first = false;
+            }
+            else { 
+                ssSwitch << "                else if "; 
+            }
+
+            // 注意处理特殊字符转义，这里简单处理
+            if (key == '\n') ssSwitch << "(c == '\\n') ";
+            else if (key == '\t') ssSwitch << "(c == '\\t') ";
+            else ssSwitch << "(c == '" << key << "') ";
+
+            ssSwitch << "nextState = " << target << ";\n";
+        }
+        ssSwitch << "                break;\n";
+
+        // --- 生成 Final State 判断部分 ---
+        if (row.isFinal) {
+            ssFinal << "            if (state == " << row.stateID << ") "
+                << "return Token{\"" << row.tokenName << "\", currentText, m_line};\n";
+        }
+    }
+
+    // 渲染模版 (Lexer.cpp)
+    std::string cppContent = TEMPLATE_LEXER_CPP;
+
+    // 替换占位符
+    cppContent = replaceAll(cppContent, "{{DFA_SWITCH_CASE}}", ssSwitch.str());
+    cppContent = replaceAll(cppContent, "{{FINAL_STATE_JUDGEMENT}}", ssFinal.str());
+
+    // 写入文件
+    std::ofstream cFile(outputDir != nullptr ? *outputDir + "/" + filename : filename); // filename 是 Lexer.cpp
+    if (!cFile) return false;
+    cFile << cppContent;
+    cFile.close();
+    std::cout << "[CodeEmitter] Generated " << filename << std::endl;
+
     return true;
 }
 

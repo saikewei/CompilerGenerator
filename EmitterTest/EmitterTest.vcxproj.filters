@@ -29,5 +29,8 @@
     <ClInclude Include="..\CompilerGenerator\CodeEmitter.h">
       <Filter>头文件</Filter>
     </ClInclude>
+    <ClInclude Include="..\CompilerGenerator\Templates.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

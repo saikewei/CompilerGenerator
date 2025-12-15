@@ -6,6 +6,8 @@
 class CodeEmitter {
 public:
     CodeEmitter();
+    CodeEmitter(const std::string& dir);
+    ~CodeEmitter();
 
     // 1. 生成词法分析器代码 (lex.cpp / lex.h)
     // 根据 DFA 表，生成 switch-case 跳转代码
@@ -23,4 +25,8 @@ public:
     bool parseInputFile(const std::string& filepath,
         std::vector<TokenDefinition>& outTokens,
         std::vector<ProductionRule>& outGrammar);
+
+private: 
+	std::string* outputDir;
+	bool generateHeader(const std::string& headerFilename);
 };
