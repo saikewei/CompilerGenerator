@@ -15,31 +15,19 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="LexerGenerator.h">
-      <Filter>头文件</Filter>
-    </ClInclude>
-    <ClInclude Include="CodeEmitter.h">
-      <Filter>头文件</Filter>
-    </ClInclude>
-    <ClInclude Include="ParserGenerator.h">
-      <Filter>头文件</Filter>
-    </ClInclude>
-    <ClInclude Include="Types.h">
-      <Filter>头文件</Filter>
-    </ClInclude>
-  </ItemGroup>
-  <ItemGroup>
     <ClCompile Include="main.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
-    <ClCompile Include="LexerGenerator.cpp">
+    <ClCompile Include="..\CompilerGenerator\CodeEmitter.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
-    <ClCompile Include="ParserGenerator.cpp">
-      <Filter>源文件</Filter>
-    </ClCompile>
-    <ClCompile Include="CodeEmitter.cpp">
-      <Filter>源文件</Filter>
-    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\CompilerGenerator\Types.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="..\CompilerGenerator\CodeEmitter.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>
