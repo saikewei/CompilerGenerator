@@ -198,7 +198,6 @@ bool CodeEmitter::generateHeader(const std::string& headerFilename = "lexer.h") 
 	return true;
 }
 
-// 占位符函数，防止编译报错，后续再实现
 bool CodeEmitter::emitLexer(const std::string& filename, const DFATable& dfa) {
     if (!generateHeader()) {
 		std::cerr << "[CodeEmitter] Failed to generate header file." << std::endl;
@@ -223,7 +222,7 @@ bool CodeEmitter::emitLexer(const std::string& filename, const DFATable& dfa) {
                 ssSwitch << "                else if "; 
             }
 
-            // 注意处理特殊字符转义，这里简单处理
+            // 处理特殊字符转义
             if (key == '\n') ssSwitch << "(c == '\\n') ";
             else if (key == '\t') ssSwitch << "(c == '\\t') ";
             else ssSwitch << "(c == '" << key << "') ";

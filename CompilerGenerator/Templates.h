@@ -117,7 +117,7 @@ Token Lexer::nextToken() {
 
             // 2. 根据终态返回 Token (这部分也需要在 Switch Case 里包含，或者单独生成)
             
-            {{FINAL_STATE_JUDGEMENT}}
+{{FINAL_STATE_JUDGEMENT}}
 
             // 兜底
             return Token{"ERROR", "Unrecognized state", m_line};
