@@ -86,13 +86,13 @@ int main(int argc, char* argv[]) {
     std::string parserOutFile = "parser.cpp";
 
     // 生成 lex.cpp
-    if (!emitter.emitLexer(lexOutFile, lexGen.getDFATable())) {
+    if (!emitter.emitLexer(lexGen.getDFATable())) {
         std::cerr << "[Error] Failed to generate lexer code." << std::endl;
         return 1;
     }
 
     // 生成 parser.cpp
-    if (!emitter.emitParser(parserOutFile,
+    if (!emitter.emitParser(
         parserGen.getActionTable(),
         parserGen.getGotoTable(),
         parserGen.getRules())) {

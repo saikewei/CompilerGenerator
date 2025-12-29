@@ -8,6 +8,9 @@
 #include <algorithm>
 #include <cctype>
 
+const std::string LEXER_FILENAME = "lexer";
+const std::string PARSER_FILENAME = "parser";
+
 // 辅助：去除首尾空格
 static std::string trim(const std::string& str) {
     size_t first = str.find_first_not_of(" \t\r\n");
@@ -30,6 +33,18 @@ static std::string replaceAll(std::string str, const std::string& from, const st
         start_pos += to.length();
     }
     return str;
+}
+
+static bool generateFile(const std::string& filepath, const std::string& content) {
+	std::ofstream file(filepath);
+
+    if (!file.is_open()) {
+        std::cerr << "Error: Could not open file " << filepath << " for writing." << std::endl;
+        return false;
+	}
+    file << content;
+    file.close();
+	return true;
 }
 
 // ==========================================
@@ -187,19 +202,11 @@ bool CodeEmitter::parseInputFile(const std::string& filepath,
     return true;
 }
 
-bool CodeEmitter::generateHeader(const std::string& headerFilename = "lexer.h") {
-	if (headerFilename.empty()) return false;
-    std::ofstream hFile(outputDir != nullptr ? *outputDir + "/" + headerFilename : headerFilename);
-    if (!hFile.is_open()) return false;
-    hFile << TEMPLATE_LEXER_H;
-    hFile.close();
-
-    std::cout << "[CodeEmitter] Generated header: " << headerFilename << std::endl;
-	return true;
-}
-
-bool CodeEmitter::emitLexer(const std::string& filename, const DFATable& dfa) {
-    if (!generateHeader()) {
+bool CodeEmitter::emitLexer(const DFATable& dfa) {
+    if (!generateFile(
+        (outputDir != nullptr ? *outputDir + "/" + LEXER_FILENAME : LEXER_FILENAME) + ".h",
+        TEMPLATE_LEXER_H
+    )) {
 		std::cerr << "[CodeEmitter] Failed to generate header file." << std::endl;
         return false;
     }
@@ -246,19 +253,128 @@ bool CodeEmitter::emitLexer(const std::string& filename, const DFATable& dfa) {
     cppContent = replaceAll(cppContent, "{{FINAL_STATE_JUDGEMENT}}", ssFinal.str());
 
     // 写入文件
-    std::ofstream cFile(outputDir != nullptr ? *outputDir + "/" + filename : filename); // filename 是 Lexer.cpp
-    if (!cFile) return false;
-    cFile << cppContent;
-    cFile.close();
-    std::cout << "[CodeEmitter] Generated " << filename << std::endl;
+    if (!generateFile(
+        (outputDir != nullptr ? *outputDir + "/" + LEXER_FILENAME : LEXER_FILENAME) + ".cpp",
+        cppContent
+    )) {
+        std::cerr << "[CodeEmitter] Failed to generate implementation file." << std::endl;
+        return false;
+    }
 
     return true;
 }
 
-bool CodeEmitter::emitParser(const std::string& filename,
-    const ActionTable& actionTbl,
+bool CodeEmitter::emitParser(const ActionTable& actionTbl,
     const GotoTable& gotoTbl,
     const std::vector<ProductionRule>& rules) {
-    std::cout << "[CodeEmitter] Generating Parser to " << filename << " (TODO)" << std::endl;
+
+    if(!generateFile(
+        (outputDir != nullptr ? *outputDir + "/" + PARSER_FILENAME : PARSER_FILENAME) + ".h",
+        TEMPLATE_PARSER_H
+	)) {
+        std::cerr << "[CodeEmitter] Failed to generate parser header file." << std::endl;
+		return false;
+	}
+
+	std::stringstream ssGoto;
+	std::stringstream ssAction;
+
+	// 生成 GOTO 表逻辑
+    for (const auto& entry : gotoTbl) {
+        int state = entry.first.first;
+		std::string nonTerm = entry.first.second;
+        int targetState = entry.second;
+        ssGoto << "    " << (ssGoto.str().empty() ? "" : "else ") << "if (state == " << state << " && lhs == \"" << nonTerm << "\") "
+			<< "return " << targetState << ";\n";
+    }
+
+	// 生成 Action 表逻辑
+    for (const auto& entry : actionTbl)
+    {
+		int state = entry.first.first;
+        std::string symbol = entry.first.second;
+		LRAction action = entry.second;
+
+		ssAction << "        " << (ssAction.str().empty() ? "" : "else ") << "if (state == " << state << " && lookahead.type == \"" << symbol << "\") {\n";
+        switch (action.type)
+        {
+        case ACTION_SHIFT:
+            ssAction << "            // Shift to state " << action.target << "\n"
+                     << "            m_stateStack.push(" << action.target << ");\n"
+                     << "            m_valueStack.push(SemanticValue{lookahead.text, lookahead.line});\n"
+                     << "            lookahead = m_lexer.nextToken();\n";
+			break;
+		case ACTION_REDUCE:
+        {
+            // 1. 获取对应的产生式规则
+            const ProductionRule& rule = rules[action.target];
+            int rhsCount = (int)rule.rhs.size();
+
+            ssAction << "            // Reduce Rule " << rule.id << ": " << rule.lhs << " -> ...\n";
+
+            // 2. 生成弹栈代码
+            for (int i = rhsCount; i >= 1; --i) {
+                ssAction << "            SemanticValue v" << i << " = m_valueStack.top();\n"
+                    << "            m_valueStack.pop();\n"
+                    << "            m_stateStack.pop();\n";
+            }
+
+            // 3. 处理语义动作字符串替换 ($$ -> res, $1 -> v1, etc.)
+            std::string processedAction = rule.semanticAction;
+
+            // 替换 $$ 为 res
+            processedAction = replaceAll(processedAction, "$$", "res");
+
+            // 替换 $1, $2... 为 v1, v2...
+            for (int i = rhsCount; i >= 1; --i) {
+                std::string target = "$" + std::to_string(i);
+                std::string replacement = "v" + std::to_string(i);
+                processedAction = replaceAll(processedAction, target, replacement);
+            }
+
+            // 4. 生成执行语义动作的代码
+            ssAction << "            SemanticValue res;\n"; // 准备结果变量
+            ssAction << "            " << processedAction << "\n"; // 插入用户写的代码
+
+            // 5. 查 GOTO 表并压入新状态
+            ssAction << "            int nextState = getGoto(m_stateStack.top(), \"" << rule.lhs << "\");\n"
+                << "            m_stateStack.push(nextState);\n"
+                << "            m_valueStack.push(res);\n";
+        }
+            break;
+		case ACTION_ACCEPT:
+            ssAction << "            // Accept\n"
+                     << "            return true;\n";
+			break;
+        case ACTION_ERROR:
+            ssAction << "            // Error\n"
+                     << "            reportError(lookahead);\n"
+                     << "            return false;\n";
+			break;
+        default:
+            break;
+        }
+		ssAction << "        }\n";
+    }
+    ssAction << "        else {\n"
+             << "            // Error\n"
+             << "            reportError(lookahead);\n"
+             << "            return false;\n"
+		<< "        }\n";
+
+	// 渲染模版 (Parser.cpp)
+	std::string cppContent = TEMPLATE_PARSER_CPP;
+	// 替换占位符
+	cppContent = replaceAll(cppContent, "{{GOTO_TABLE_LOGIC}}", ssGoto.str());
+	cppContent = replaceAll(cppContent, "{{ACTION_TABLE_LOGIC}}", ssAction.str());
+	// 写入文件
+    if (!generateFile(
+        (outputDir != nullptr ? *outputDir + "/" + PARSER_FILENAME : PARSER_FILENAME) + ".cpp",
+        cppContent
+    )) {
+        std::cerr << "[CodeEmitter] Failed to generate parser implementation file." << std::endl;
+        return false;
+	}
+
     return true;
 }

@@ -49,7 +49,7 @@ private:
 // 2. Lexer 实现文件模版 (Lexer.cpp)
 // =========================================================
 const std::string TEMPLATE_LEXER_CPP = R"(
-#include "Lexer.h"
+#include "lexer.h"
 
 Lexer::Lexer(const std::string& source) 
     : m_source(source), m_pos(0), m_line(1) {}
@@ -122,6 +122,137 @@ Token Lexer::nextToken() {
             // 兜底
             return Token{"ERROR", "Unrecognized state", m_line};
         }
+    }
+}
+)";
+
+// =========================================================
+// 3. Parser 头文件模版 (Parser.h)
+// =========================================================
+const std::string TEMPLATE_PARSER_H = R"(
+#ifndef GENERATED_PARSER_H
+#define GENERATED_PARSER_H
+
+#include "lexer.h"
+#include <vector>
+#include <string>
+#include <stack>
+#include <iostream>
+
+// --- 核心：语义值结构体 (Semantic Value) ---
+// 这个结构体在规约过程中在栈内传递。
+// 它必须包含 rules.txt 中可能用到的所有属性。
+struct SemanticValue {
+    // 1. 基础属性
+    std::string text;       // 词法单元的原始文本 (例如 "count", "123")
+    int line;               // 行号
+
+    // 2. 语义属性 (SDT / 中间代码生成用)
+    std::string code = "";       // 存储生成的代码片段
+    std::string var = "";        // 存储临时变量名 (例如 "t1")
+    std::string trueLabel = "";  // 布尔表达式为真时的跳转标签 (例如 "L1")
+    std::string falseLabel = ""; // 布尔表达式为假时的跳转标签 (例如 "L2")
+    std::string beginLabel = ""; // 循环开始标签
+    std::string nextLabel = "";  // 语句结束后的连接标签
+    
+    // 3. 数值属性 (如果是做计算器)
+    int val = 0;
+};
+
+class Parser {
+public:
+    Parser(Lexer& lexer);
+    
+    // 执行解析
+    // 返回 true 表示解析成功，false 表示失败
+    bool parse();
+
+private:
+    Lexer& m_lexer;
+    
+    // LR 分析的核心栈
+    std::stack<int> m_stateStack;           // 状态栈
+    std::stack<SemanticValue> m_valueStack; // 值栈 ($1, $2, $$...)
+
+    // 辅助：查 GOTO 表
+    // 给定当前状态和非终结符(LHS)，返回下一个状态
+    int getGoto(int state, const std::string& lhs);
+    
+    // 辅助：打印错误信息
+    void reportError(const Token& token);
+};
+
+#endif // GENERATED_PARSER_H
+)";
+
+// =========================================================
+// 4. Parser 实现文件模版 (Parser.cpp)
+// =========================================================
+const std::string TEMPLATE_PARSER_CPP = R"(
+#include "parser.h"
+#include <sstream>
+
+// =========================================================
+//  全局辅助函数 (供 rules.txt 中的语义动作调用)
+// =========================================================
+
+static int g_tempCount = 0;
+static int g_labelCount = 0;
+
+// 生成临时变量名: t1, t2, ...
+std::string newTemp() {
+    return "t" + std::to_string(++g_tempCount);
+}
+
+// 生成标签名: L1, L2, ...
+std::string newLabel() {
+    return "L" + std::to_string(++g_labelCount);
+}
+
+// 输出中间代码 (这里简单打印到控制台，实际可以写入文件)
+void emit(const std::string& code) {
+    std::cout << code << std::endl;
+}
+
+// =========================================================
+//  Parser 类实现
+// =========================================================
+
+Parser::Parser(Lexer& lexer) : m_lexer(lexer) {
+    // 初始状态入栈 (通常是 0)
+    m_stateStack.push(0);
+}
+
+void Parser::reportError(const Token& token) {
+    std::cerr << "[Syntax Error] Unexpected token '" << token.type 
+              << "' (" << token.text << ") at line " << token.line << std::endl;
+}
+
+int Parser::getGoto(int state, const std::string& lhs) {
+{{GOTO_TABLE_LOGIC}}
+    return -1; // error
+}
+
+bool Parser::parse() {
+    // 读取第一个 Token (Lookahead)
+    Token lookahead = m_lexer.nextToken();
+
+    while (true) {
+        int state = m_stateStack.top();
+        std::string type = lookahead.type;
+
+        // 调试日志 (可选)
+        // std::cout << "State: " << currentState << ", Lookahead: " << type << std::endl;
+
+        // ============================================================
+        //  ACTION 表逻辑 (由代码生成器填充)
+        // ============================================================
+        // 分支结构，决定是 Shift, Reduce, Accept 还是 Error
+
+        // CodeEmitter 生成一系列 if-else 语句替换这里
+        
+{{ACTION_TABLE_LOGIC}}
+       
     }
 }
 )";

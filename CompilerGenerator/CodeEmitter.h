@@ -11,12 +11,11 @@ public:
 
     // 1. 生成词法分析器代码 (lex.cpp / lex.h)
     // 根据 DFA 表，生成 switch-case 跳转代码
-    bool emitLexer(const std::string& filename, const DFATable& dfa);
+    bool emitLexer(const DFATable& dfa);
 
     // 2. 生成语法分析器代码 (parser.cpp / parser.h)
     // 根据 LR 表和产生式，生成栈操作代码和语义动作 switch-case
-    bool emitParser(const std::string& filename,
-        const ActionTable& actionTbl,
+    bool emitParser(const ActionTable& actionTbl,
         const GotoTable& gotoTbl,
         const std::vector<ProductionRule>& rules);
 
