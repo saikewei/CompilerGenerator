@@ -343,7 +343,8 @@ bool CodeEmitter::emitParser(const ActionTable& actionTbl,
         }
             break;
 		case ACTION_ACCEPT:
-            ssAction << "            // Accept\n"
+            ssAction << "            printGeneratedCode();\n"
+                     << "            // Accept\n"
                      << "            return true;\n";
 			break;
         case ACTION_ERROR:

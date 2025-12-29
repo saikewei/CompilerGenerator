@@ -138,25 +138,26 @@ const std::string TEMPLATE_PARSER_H = R"(
 #include <string>
 #include <stack>
 #include <iostream>
+#include <algorithm> // 用于合并列表
 
 // --- 核心：语义值结构体 (Semantic Value) ---
-// 这个结构体在规约过程中在栈内传递。
-// 它必须包含 rules.txt 中可能用到的所有属性。
 struct SemanticValue {
-    // 1. 基础属性
-    std::string text;       // 词法单元的原始文本 (例如 "count", "123")
-    int line;               // 行号
+    std::string text;       
+    int line;               
 
-    // 2. 语义属性 (SDT / 中间代码生成用)
-    std::string code = "";       // 存储生成的代码片段
-    std::string var = "";        // 存储临时变量名 (例如 "t1")
-    std::string trueLabel = "";  // 布尔表达式为真时的跳转标签 (例如 "L1")
-    std::string falseLabel = ""; // 布尔表达式为假时的跳转标签 (例如 "L2")
-    std::string beginLabel = ""; // 循环开始标签
-    std::string nextLabel = "";  // 语句结束后的连接标签
+    // SDT 属性
+    std::string code = "";       
+    std::string var = "";        
     
-    // 3. 数值属性 (如果是做计算器)
+    // 回填 (Backpatching) 专用属性
+    std::vector<int> trueList;   
+    std::vector<int> falseList;  
+    std::vector<int> nextList;   
+    
+    int quad = 0; // M 标记用
     int val = 0;
+
+    SemanticValue(std::string t = "", int l = 0) : text(t), line(l) {}
 };
 
 class Parser {
@@ -164,22 +165,39 @@ public:
     Parser(Lexer& lexer);
     
     // 执行解析
-    // 返回 true 表示解析成功，false 表示失败
     bool parse();
+
+    // 打印最终生成的代码
+    void printGeneratedCode() const;
+
+    // 获取生成的代码缓冲区 (如果外部需要)
+    const std::vector<std::string>& getCodeBuffer() const { return m_codeBuffer; }
 
 private:
     Lexer& m_lexer;
-    
-    // LR 分析的核心栈
-    std::stack<int> m_stateStack;           // 状态栈
-    std::stack<SemanticValue> m_valueStack; // 值栈 ($1, $2, $$...)
+    std::stack<int> m_stateStack;           
+    std::stack<SemanticValue> m_valueStack; 
 
-    // 辅助：查 GOTO 表
-    // 给定当前状态和非终结符(LHS)，返回下一个状态
+    // --- 中间代码生成器状态 (原全局变量) ---
+    std::vector<std::string> m_codeBuffer; // 代码缓冲区
+    int m_tempCount;                       // 临时变量计数
+    int m_labelCount;                      // 标签计数
+
+    // --- 辅助函数：查表与报错 ---
     int getGoto(int state, const std::string& lhs);
-    
-    // 辅助：打印错误信息
     void reportError(const Token& token);
+
+    // --- 辅助函数：中间代码生成 (供语义动作调用) ---
+    int nextquad() const;
+    std::string newTemp();
+    std::string newLabel();
+    void emit(const std::string& code);
+    
+    // --- 辅助函数：回填逻辑 ---
+    std::vector<int> makelist(int index);
+    std::vector<int> merge(const std::vector<int>& list1, const std::vector<int>& list2);
+    void backpatch(const std::vector<int>& list, int targetQuad);
+    void backpatch(const std::vector<int>& list, const std::string& targetLabel);
 };
 
 #endif // GENERATED_PARSER_H
@@ -191,37 +209,81 @@ private:
 const std::string TEMPLATE_PARSER_CPP = R"(
 #include "parser.h"
 #include <sstream>
-
-// =========================================================
-//  全局辅助函数 (供 rules.txt 中的语义动作调用)
-// =========================================================
-
-static int g_tempCount = 0;
-static int g_labelCount = 0;
-
-// 生成临时变量名: t1, t2, ...
-std::string newTemp() {
-    return "t" + std::to_string(++g_tempCount);
-}
-
-// 生成标签名: L1, L2, ...
-std::string newLabel() {
-    return "L" + std::to_string(++g_labelCount);
-}
-
-// 输出中间代码 (这里简单打印到控制台，实际可以写入文件)
-void emit(const std::string& code) {
-    std::cout << code << std::endl;
-}
+#include <iomanip>
 
 // =========================================================
 //  Parser 类实现
 // =========================================================
 
-Parser::Parser(Lexer& lexer) : m_lexer(lexer) {
-    // 初始状态入栈 (通常是 0)
+Parser::Parser(Lexer& lexer) 
+    : m_lexer(lexer), m_tempCount(0), m_labelCount(0) 
+{
+    // 初始状态入栈
     m_stateStack.push(0);
+    // 缓冲区自动初始化为空
 }
+
+// ---------------------------------------------------------
+//  中间代码生成辅助函数 (成员函数实现)
+// ---------------------------------------------------------
+
+int Parser::nextquad() const {
+    return (int)m_codeBuffer.size();
+}
+
+std::string Parser::newTemp() {
+    return "t" + std::to_string(++m_tempCount);
+}
+
+std::string Parser::newLabel() {
+    return "L" + std::to_string(++m_labelCount);
+}
+
+void Parser::emit(const std::string& code) {
+    m_codeBuffer.push_back(code);
+}
+
+std::vector<int> Parser::makelist(int index) {
+    std::vector<int> list;
+    list.push_back(index);
+    return list;
+}
+
+std::vector<int> Parser::merge(const std::vector<int>& list1, const std::vector<int>& list2) {
+    std::vector<int> merged = list1;
+    merged.insert(merged.end(), list2.begin(), list2.end());
+    return merged;
+}
+
+void Parser::backpatch(const std::vector<int>& list, int targetQuad) {
+    std::string targetStr = std::to_string(targetQuad);
+    for (int index : list) {
+        if (index >= 0 && index < (int)m_codeBuffer.size()) {
+            // 在指令末尾追加目标地址
+            m_codeBuffer[index] += " " + targetStr; 
+        }
+    }
+}
+
+void Parser::backpatch(const std::vector<int>& list, const std::string& targetLabel) {
+    for (int index : list) {
+        if (index >= 0 && index < (int)m_codeBuffer.size()) {
+            m_codeBuffer[index] += " " + targetLabel;
+        }
+    }
+}
+
+void Parser::printGeneratedCode() const {
+    std::cout << "\n=== Intermediate Code Generation ===\n";
+    for (size_t i = 0; i < m_codeBuffer.size(); ++i) {
+        std::cout << std::setw(3) << i << ": " << m_codeBuffer[i] << std::endl;
+    }
+    std::cout << "====================================\n";
+}
+
+// ---------------------------------------------------------
+//  核心解析逻辑
+// ---------------------------------------------------------
 
 void Parser::reportError(const Token& token) {
     std::cerr << "[Syntax Error] Unexpected token '" << token.type 
@@ -230,26 +292,19 @@ void Parser::reportError(const Token& token) {
 
 int Parser::getGoto(int state, const std::string& lhs) {
 {{GOTO_TABLE_LOGIC}}
-    return -1; // error
+    return -1; 
 }
 
 bool Parser::parse() {
-    // 读取第一个 Token (Lookahead)
     Token lookahead = m_lexer.nextToken();
 
     while (true) {
         int state = m_stateStack.top();
         std::string type = lookahead.type;
 
-        // 调试日志 (可选)
-        // std::cout << "State: " << currentState << ", Lookahead: " << type << std::endl;
-
         // ============================================================
-        //  ACTION 表逻辑 (由代码生成器填充)
+        //  ACTION 表逻辑
         // ============================================================
-        // 分支结构，决定是 Shift, Reduce, Accept 还是 Error
-
-        // CodeEmitter 生成一系列 if-else 语句替换这里
         
 {{ACTION_TABLE_LOGIC}}
        
