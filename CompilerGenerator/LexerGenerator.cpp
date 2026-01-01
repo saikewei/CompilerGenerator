@@ -5,6 +5,9 @@
 #include <algorithm>
 #include <sstream>
 #include <cctype>
+#include <stdexcept>
+
+static const char LITERAL_MARK = '\x01';
 
 // 构造函数
 LexerGenerator::LexerGenerator() : nextStateID(0) {
@@ -19,72 +22,108 @@ void LexerGenerator::addRule(const std::string& tokenName, const std::string& re
 // ========== 正则表达式预处理 ==========
 std::string LexerGenerator::preprocessRegex(const std::string& regex) {
     std::string result;
-    bool inCharClass = false;
-    bool escape = false;
+    const size_t n = regex.size();
 
-    for (size_t i = 0; i < regex.length(); ++i) {
+    auto decodeEscape = [](char c) -> char {
+        switch (c) {
+        case 'n': return '\n';
+        case 't': return '\t';
+        case 'r': return '\r';
+        default:  return c;   // 普通转义，如 \+ \* 等
+        }
+        };
+
+    for (size_t i = 0; i < n; ++i) {
         char c = regex[i];
 
-        if (escape) {
-            // 给转义字符加一个特殊前缀，避免在后缀转换时混淆
-            // 这里我们暂且直接存入，但在后缀处理时要小心
-            if (c == 'n') result += '\n';
-            else if (c == 't') result += '\t';
-            else if (c == 'r') result += '\r';
-            else result += c;
+        /* ========== 字符类处理 ========= */
+        if (c == '[') {
+            result.push_back('(');
+            bool first = true;
 
-            // 关键：如果在字符类内，每加一个项都要跟一个 |
-            if (inCharClass) result += '|';
-
-            escape = false;
-        }
-        else if (c == '\\') {
-            escape = true; // 下一轮循环处理
-            // 注意：为了让 regexToPostfix 区分字面量 '+' 和运算符 '+'，
-            // 严谨的做法是在这里插入一个特殊标记，或者在 result 中保留转义符。
-            // 为了最小化改动，建议让 regexToPostfix 也支持转义，见下文。
-            result += '\\';
-        }
-        else if (c == '[' && !inCharClass) {
-            inCharClass = true;
-            result += '(';
-        }
-        else if (c == ']' && inCharClass) {
-            inCharClass = false;
-            // 移除末尾多余的 '|'
-            if (result.back() == '|') result.pop_back();
-            result += ')';
-        }
-        else if (inCharClass) {
-            if (c == '-' && i > 0 && i + 1 < regex.length()) {
-                // 处理范围 [a-z]
-                char start = regex[i - 1];
-                char end = regex[i + 1];
-
-                // 因为我们在添加 start 时多加了一个 '|'，需要先弹出来
-                if (result.back() == '|') result.pop_back();
-                // 弹出 start 字符本身，因为我们要重新构建范围序列
-                result.pop_back();
-
-                result += '(';
-                for (char ch = start; ch <= end; ++ch) {
-                    result += ch;
-                    if (ch < end) result += '|';
+            ++i; // 跳过 '['
+            while (i < n && regex[i] != ']') {
+                if (!first) {
+                    result.push_back('|');
                 }
-                result += ')';
+                first = false;
 
-                i++; // 跳过结束字符
+                char startChar;
+
+                /* ---- 处理转义 ---- */
+                if (regex[i] == '\\') {
+                    if (i + 1 >= n)
+                        throw std::runtime_error("Invalid escape in character class");
+
+                    startChar = decodeEscape(regex[i + 1]);
+                    i += 2;
+                }
+                else {
+                    startChar = regex[i];
+                    ++i;
+                }
+
+                /* ---- 检查是否是范围 a-z ---- */
+                if (i + 1 < n && regex[i] == '-' && regex[i + 1] != ']') {
+                    i++; // 跳过 '-'
+
+                    char endChar;
+                    if (regex[i] == '\\') {
+                        if (i + 1 >= n)
+                            throw std::runtime_error("Invalid escape in range");
+                        endChar = decodeEscape(regex[i + 1]);
+                        i += 2;
+                    }
+                    else {
+                        endChar = regex[i];
+                        ++i;
+                    }
+
+                    if (startChar > endChar)
+                        throw std::runtime_error("Invalid range");
+
+                    for (char ch = startChar; ch <= endChar; ++ch) {
+                        if (ch != startChar)
+                            result.push_back('|');
+                        result.push_back(ch);
+                    }
+                }
+                else {
+                    result.push_back(startChar);
+                }
             }
-            else {
-                result += c;
-            }
-            // 字符类内，每添加一个元素后加 '|'
-            result += '|';
+
+            if (i >= n || regex[i] != ']')
+                throw std::runtime_error("Unclosed character class");
+
+            result.push_back(')');
         }
+
+        /* ========== 普通转义处理 ========= */
+        else if (c == '\\') {
+            if (i + 1 >= n)
+                throw std::runtime_error("Dangling escape");
+
+            char decoded = decodeEscape(regex[i + 1]);
+
+            // 控制字符直接写入
+            if (regex[i + 1] == 'n' || regex[i + 1] == 't' || regex[i + 1] == 'r') {
+                result.push_back(decoded);
+            }
+            // 元字符转义，保留反斜杠
+            else {
+                result.push_back('\\');
+                result.push_back(decoded);
+            }
+            ++i;
+        }
+
+        /* ========== 普通字符 ========= */
         else {
-            result += c;
+            result.push_back(c);
         }
     }
+
     return result;
 }
 
@@ -92,7 +131,6 @@ std::string LexerGenerator::preprocessRegex(const std::string& regex) {
 std::string LexerGenerator::regexToPostfix(const std::string& regex) {
     std::string postfix;
     std::stack<char> opStack;
-    bool escape = false; // 新增状态
 
     auto precedence = [](char op) -> int {
         if (op == '*') return 3;
@@ -144,11 +182,12 @@ std::string LexerGenerator::regexToPostfix(const std::string& regex) {
         char c = withConcat[i];
 
         if (c == '\\') {
-            // 遇到转义符，直接把下一个字符当作普通操作数加入后缀
             if (i + 1 < withConcat.length()) {
-                postfix += withConcat[i + 1];
+                postfix += LITERAL_MARK;          // 标记：这是字面字符
+                postfix += withConcat[i + 1];     // 实际字符，如 + *
                 i++;
             }
+            continue;
         }
         // 修改：允许下划线 _ 和其他符号作为操作数
         else if (isalnum(c) || c == '_' || c == '=' || c == '<' || c == '>' || c == ';' || c == '{' || c == '}' || c == ' ' || c == '\n' || c == '\t' || c == '\r') {
@@ -189,8 +228,32 @@ NFA LexerGenerator::regexToNFA(const std::string& regex, const std::string& toke
     
     std::stack<NFA> nfaStack;
     
-    for (char c : postfix) {
-        if (c == '.') {
+    for (size_t i = 0; i < postfix.size(); ++i) {
+        char c = postfix[i];
+        if (c == '\x01') {   // LITERAL_MARK
+            char literal = postfix[++i];
+
+            int start = nextStateID++;
+            int end = nextStateID++;
+
+            NFAState startState;
+            startState.id = start;
+            startState.transitions[literal].insert(end);
+
+            NFAState endState;
+            endState.id = end;
+            endState.isFinal = true;
+            endState.tokenName = tokenName;
+
+            NFA nfa;
+            nfa.startState = start;
+            nfa.endState = end;
+            nfa.states[start] = startState;
+            nfa.states[end] = endState;
+
+            nfaStack.push(nfa);
+            continue;
+        } else if (c == '.') {
             // 连接操作
             if (nfaStack.size() < 2) continue;
             NFA nfa2 = nfaStack.top(); nfaStack.pop();
@@ -568,22 +631,29 @@ void LexerGenerator::minimizeDFA() {
     }
     
     // Hopcroft算法：基于等价类划分
-    std::set<int> acceptingStates;
     std::set<int> nonAcceptingStates;
-    
+    std::map<std::string, std::set<int>> acceptingGroups; // 按 Token 名分类
+
     for (const auto& pair : dfaStates) {
         if (pair.second.isFinal) {
-            acceptingStates.insert(pair.first);
+            // 根据 TokenName 分组
+            acceptingGroups[pair.second.tokenName].insert(pair.first);
         }
         else {
             nonAcceptingStates.insert(pair.first);
         }
     }
-    
+
     std::vector<std::set<int>> partitions;
-    if (!acceptingStates.empty()) partitions.push_back(acceptingStates);
-    if (!nonAcceptingStates.empty()) partitions.push_back(nonAcceptingStates);
-    
+    if (!nonAcceptingStates.empty()) {
+        partitions.push_back(nonAcceptingStates);
+    }
+
+    // 将每种 Token 类型的终态作为独立的初始划分
+    for (const auto& group : acceptingGroups) {
+        partitions.push_back(group.second);
+    }
+
     if (partitions.empty()) return;
     
     // 迭代细化划分
@@ -646,43 +716,72 @@ void LexerGenerator::minimizeDFA() {
     }
     
     // 构建最小化后的DFA
-    std::map<int, int> stateMapping;  // 旧状态 -> 新状态
+    // 找出原 Start State (0) 在哪个 partition
+    int startPartitionIndex = -1;
+    for (size_t i = 0; i < partitions.size(); ++i) {
+        if (partitions[i].count(0)) {
+            startPartitionIndex = i;
+            break;
+        }
+    }
+
+    std::map<int, int> stateMapping; // 旧状态 ID -> 新状态 ID
     std::map<int, DFASubset> minimizedStates;
-    int newStateID = 0;
-    
-    for (const auto& partition : partitions) {
-        int representative = *partition.begin();
-        stateMapping[representative] = newStateID;
-        
+
+    int currentID = 1;
+
+    // 第一步：分配 ID
+    for (size_t i = 0; i < partitions.size(); ++i) {
+        int newID;
+        if (i == startPartitionIndex) {
+            newID = 0; // 强制归位
+        }
+        else {
+            newID = currentID++;
+        }
+
+        // 记录所有旧状态的映射
+        for (int oldState : partitions[i]) {
+            stateMapping[oldState] = newID;
+        }
+
+        // 初始化新状态
         DFASubset newSubset;
-        newSubset.dfaStateID = newStateID;
-        newSubset.isFinal = dfaStates[representative].isFinal;
-        newSubset.tokenName = dfaStates[representative].tokenName;
-        
-        // 构建转换
-        if (transitions.find(representative) != transitions.end()) {
-            for (const auto& trans : transitions.at(representative)) {
-                int oldTarget = trans.second;
-                // 找到目标所在的划分
-                int targetPartition = -1;
-                for (size_t i = 0; i < partitions.size(); ++i) {
-                    if (partitions[i].find(oldTarget) != partitions[i].end()) {
-                        targetPartition = i;
-                        break;
-                    }
-                }
-                if (targetPartition >= 0) {
-                    int newTarget = stateMapping[*partitions[targetPartition].begin()];
-                    newSubset.transitions[trans.first] = newTarget;
+        newSubset.dfaStateID = newID;
+
+        // 属性合并
+        for (int oldState : partitions[i]) {
+            if (dfaStates[oldState].isFinal) {
+                newSubset.isFinal = true;
+                // 如果有多个 Token 名，保留第一个非空的
+                if (newSubset.tokenName.empty()) {
+                    newSubset.tokenName = dfaStates[oldState].tokenName;
                 }
             }
         }
-        
-        minimizedStates[newStateID] = newSubset;
-        newStateID++;
+        minimizedStates[newID] = newSubset;
     }
-    
-    // 更新DFATable
+
+    // 第二步：构建转换边
+    for (size_t i = 0; i < partitions.size(); ++i) {
+        int representative = *partitions[i].begin(); // 随便取一个代表
+        int srcNewID = stateMapping[representative];
+
+        if (transitions.find(representative) != transitions.end()) {
+            for (const auto& trans : transitions.at(representative)) {
+                char inputChar = trans.first;
+                int oldTarget = trans.second;
+
+                // 查找目标状态的新 ID
+                if (stateMapping.find(oldTarget) != stateMapping.end()) {
+                    int dstNewID = stateMapping[oldTarget];
+                    minimizedStates[srcNewID].transitions[inputChar] = dstNewID;
+                }
+            }
+        }
+    }
+
+    // 更新成员变量
     convertToDFATable(minimizedStates);
 }
 
