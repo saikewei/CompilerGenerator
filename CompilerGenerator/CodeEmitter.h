@@ -27,5 +27,4 @@ public:
 
 private: 
 	std::string* outputDir;
-	bool generateHeader(const std::string& headerFilename);
 };
