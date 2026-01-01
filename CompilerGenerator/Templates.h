@@ -45,9 +45,6 @@ private:
 #endif // GENERATED_LEXER_H
 )";
 
-// =========================================================
-// 2. Lexer 实现文件模版 (Lexer.cpp)
-// =========================================================
 const std::string TEMPLATE_LEXER_CPP = R"(
 #include "lexer.h"
 
@@ -72,56 +69,72 @@ char Lexer::advance() {
 }
 
 Token Lexer::nextToken() {
-    // 跳过 EOF 检查，由状态机处理或在此处处理
-    if (m_pos >= m_source.length()) {
-        return Token{"EOF", "", m_line};
-    }
-
-    int state = 0;       // 初始状态
-    std::string currentText;
-    
-    // 记录开始时的位置，如果匹配失败方便回溯（简单DFA通常不需要回溯，这里仅作变量定义）
-    // size_t startPos = m_pos; 
-
-    // 贪婪匹配循环
+    // 外层循环：用于处理 SKIP 类型的 Token
+    // 如果匹配到了 SKIP，循环会继续，直到匹配到非 SKIP 或 EOF
     while (true) {
-        char c = peek(); // 只看一眼，不移动指针
-        int nextState = -1;
+        
+        // 使用 Lambda 封装一次 DFA 贪婪匹配过程
+        auto matchOneToken = [&]() -> Token {
+            // EOF 检查
+            if (m_pos >= m_source.length()) {
+                return Token{"EOF", "", m_line};
+            }
 
-        // ==========================================
-        //  DFA 状态跳转表 (自动生成)
-        // ==========================================
-        switch (state) {
+            int state = 0;       // 初始状态
+            std::string currentText;
+            
+            // 贪婪匹配循环
+            while (true) {
+                char c = peek(); 
+                int nextState = -1;
+
+                // ==========================================
+                //  DFA 状态跳转表 (自动生成)
+                // ==========================================
+                switch (state) {
 {{DFA_SWITCH_CASE}} 
-            default:
-                break;
-        }
-        // ==========================================
+                    default:
+                        break;
+                }
+                // ==========================================
 
-        if (nextState != -1) {
-            // 状态转移成功
-            state = nextState;
-            advance(); // 真的吃掉字符
-            
-            // 只有当不是状态0自循环（跳过空格）时，才记录文本
-            if (!(state == 0 && nextState == 0)) {
-                currentText += c;
-            }
-        } else {
-            // 没路走了，根据当前停留在的状态决定 Token 类型
-            
-            // 1. 如果还在初始状态 0，说明遇到非法字符
-            if (state == 0) {
-                 return Token{"ERROR", std::string(1, c), m_line};
-            }
+                if (nextState != -1) {
+                    // 状态转移成功
+                    state = nextState;
+                    advance(); // 吃掉字符
+                    currentText += c; // 记录文本
+                } else {
+                    // 没路走了，根据当前停留在的状态决定 Token 类型
+                    
+                    // 1. 如果还在初始状态 0，说明遇到的第一个字符就是非法的
+                    if (state == 0) {
+                         // 移动指针避免死循环，并返回错误
+                         char errC = advance(); 
+                         return Token{"ERROR", std::string(1, errC), m_line};
+                    }
 
-            // 2. 根据终态返回 Token (这部分也需要在 Switch Case 里包含，或者单独生成)
-            
+                    // 2. 根据终态返回 Token 
+                    // (生成的代码包含 return 语句，这里会退出 Lambda)
 {{FINAL_STATE_JUDGEMENT}}
 
-            // 兜底
-            return Token{"ERROR", "Unrecognized state", m_line};
+                    // 兜底：虽然走了很多步，但停在了一个非终态上
+                    return Token{"ERROR", "Unrecognized state: " + currentText, m_line};
+                }
+            }
+        };
+
+        // === 执行匹配 ===
+        Token token = matchOneToken();
+
+        // === 关键逻辑 ===
+        // 如果 Token 类型是 SKIP (在规则中定义的忽略项)
+        // 则不返回给 Parser，而是重置状态继续循环，寻找下一个 Token
+        if (token.type == "SKIP") {
+            continue;
         }
+
+        // 如果是普通 Token、EOF 或 ERROR，则返回
+        return token;
     }
 }
 )";
