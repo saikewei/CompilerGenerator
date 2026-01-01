@@ -10,7 +10,7 @@ print           PRINT
 [a-zA-Z_]+      ID
 \+              PLUS
 \-              MINUS
-\* MUL
+\*              MUL
 \/              DIV
 =               ASSIGN
 ==              EQ
@@ -30,117 +30,166 @@ print           PRINT
 // ==========================================
 
 // 程序由一系列语句组成
-program : stmt_list { 
-    printf("Program Parsing Finished.\n"); 
+Program : StmtList {
+    $$.code = $1.code;
 }
 
-stmt_list : stmt_list stmt { 
-    // 列表递归
-}
-stmt_list : stmt { 
-    // 单条语句
+// 语句列表
+StmtList : StmtList Stmt {
+    $$.code = $1.code + $2.code;
 }
 
-// === 语句 (Statement) ===
-
-// 1. 赋值语句: a = b + 1;
-stmt : ID ASSIGN expr SEMI { 
-    // 生成: a = t1
-    std::cout << $1.text << " = " << $3.temp << std::endl; 
+StmtList : Stmt {
+    $$.code = $1.code;
 }
 
-// 2. 块语句: { stmt ... }
-stmt : LBRACE stmt_list RBRACE { 
-    // 块结构通常不需要生成特殊的中间代码，除非涉及作用域
+// 语句类型：赋值、if、while、print、复合语句
+Stmt : ID ASSIGN Expr SEMI {
+    emit($1.text + " = " + $3.var);
+    $$.code = $3.code;
 }
 
-// 3. While 循环: while (a < 10) { ... }
-// 逻辑: 
-// L_start:
-//    if (cond == false) goto L_end
-//    stmt
-//    goto L_start
-// L_end:
-stmt : WHILE LPAREN bool_expr RPAREN stmt { 
-    std::string L_start = newLabel();
-    std::string L_end = newLabel();
-    
-    // 输出伪代码逻辑 (实际实现时，L_start应该在bool_expr之前生成并打印)
-    std::cout << "LABEL " << L_start << ":" << std::endl;
-    std::cout << "IF " << $3.temp << " == false GOTO " << L_end << std::endl;
-    // (stmt 的代码会在这里被递归打印)
-    std::cout << "GOTO " << L_start << std::endl;
-    std::cout << "LABEL " << L_end << ":" << std::endl;
+Stmt : IF LPAREN BoolExpr RPAREN M1 Stmt M2 ELSE M3 Stmt {
+    backpatch($3.trueList, $5.quad);
+    backpatch($3.falseList, $9.quad);
+    $$.nextList = merge(merge($6.nextList, $7.nextList), $10.nextList);
+    $$.code = $3.code + $6.code + "goto " + std::to_string($7.quad) + "\n" + $10.code;
 }
 
-// 4. If-Else 分支
-// 注意: 这里是最简单的写法，存在"悬挂else"歧义，但在LR分析中通常默认移进解决
-stmt : IF LPAREN bool_expr RPAREN stmt ELSE stmt { 
-    std::string L_else = newLabel();
-    std::string L_end = newLabel();
-
-    std::cout << "IF " << $3.temp << " == false GOTO " << L_else << std::endl;
-    // (stmt1 代码)
-    std::cout << "GOTO " << L_end << std::endl;
-    std::cout << "LABEL " << L_else << ":" << std::endl;
-    // (stmt2 代码)
-    std::cout << "LABEL " << L_end << ":" << std::endl;
+Stmt : IF LPAREN BoolExpr RPAREN M1 Stmt {
+    backpatch($3.trueList, $5.quad);
+    $$.nextList = merge($3.falseList, $6.nextList);
+    $$.code = $3.code + $6.code;
 }
 
-stmt : IF LPAREN bool_expr RPAREN stmt { 
-    std::string L_end = newLabel();
-    std::cout << "IF " << $3.temp << " == false GOTO " << L_end << std::endl;
-    // (stmt 代码)
-    std::cout << "LABEL " << L_end << ":" << std::endl;
+Stmt : WHILE M1 LPAREN BoolExpr RPAREN M2 Stmt {
+    backpatch($7.nextList, $2.quad);
+    backpatch($4.trueList, $6.quad);
+    $$.nextList = $4.falseList;
+    emit("goto " + std::to_string($2.quad));
+    $$.code = $4.code + $7.code;
 }
 
-// === 布尔表达式 (Boolean Expression) ===
-// 用于 if 和 while 的条件判断
-bool_expr : expr LT expr { 
-    $$ = newTemp();
-    std::cout << $$ << " = " << $1.temp << " < " << $3.temp << std::endl;
-}
-bool_expr : expr GT expr { 
-    $$ = newTemp();
-    std::cout << $$ << " = " << $1.temp << " > " << $3.temp << std::endl;
-}
-bool_expr : expr EQ expr { 
-    $$ = newTemp();
-    std::cout << $$ << " = " << $1.temp << " == " << $3.temp << std::endl;
+Stmt : PRINT LPAREN Expr RPAREN SEMI {
+    emit("print " + $3.var);
+    $$.code = $3.code;
 }
 
-// === 算术表达式 (Arithmetic Expression) ===
-
-expr : expr PLUS term { 
-    $$ = newTemp(); 
-    std::cout << $$ << " = " << $1.temp << " + " << $3.temp << std::endl;
-}
-expr : expr MINUS term { 
-    $$ = newTemp(); 
-    std::cout << $$ << " = " << $1.temp << " - " << $3.temp << std::endl;
-}
-expr : term { 
-    $$ = $1; 
+Stmt : LBRACE StmtList RBRACE {
+    $$.code = $2.code;
+    $$.nextList = $2.nextList;
 }
 
-term : term MUL factor { 
-    $$ = newTemp(); 
-    std::cout << $$ << " = " << $1.temp << " * " << $3.temp << std::endl;
-}
-term : term DIV factor { 
-    $$ = newTemp(); 
-    std::cout << $$ << " = " << $1.temp << " / " << $3.temp << std::endl;
-}
-term : factor { 
-    $$ = $1; 
+// 标记非终结符 M (记录代码位置)
+M1 : {
+    $$.quad = nextquad();
 }
 
-factor : LPAREN expr RPAREN { 
-    $$ = $2; 
+M2 : {
+    $$.quad = nextquad();
 }
-factor : ID { 
-    $$.temp = $1.text; // 如果是变量，直接用变量名
+
+M3 : {
+    $$.quad = nextquad();
 }
-factor : NUM { 
-    $$.temp = $1.text; // 如果是数字，直接用数字字符串
+
+// 布尔表达式（用于条件判断）
+BoolExpr : BoolExpr OR M1 BoolTerm {
+    backpatch($1.falseList, $3.quad);
+    $$.trueList = merge($1.trueList, $4.trueList);
+    $$.falseList = $4.falseList;
+    $$.code = $1.code + $4.code;
+}
+
+BoolExpr : BoolTerm {
+    $$.trueList = $1.trueList;
+    $$.falseList = $1.falseList;
+    $$.code = $1.code;
+}
+
+BoolTerm : BoolTerm AND M1 BoolFactor {
+    backpatch($1.trueList, $3.quad);
+    $$.trueList = $4.trueList;
+    $$.falseList = merge($1.falseList, $4.falseList);
+    $$.code = $1.code + $4.code;
+}
+
+BoolTerm : BoolFactor {
+    $$.trueList = $1.trueList;
+    $$.falseList = $1.falseList;
+    $$.code = $1.code;
+}
+
+BoolFactor : Expr LT Expr {
+    $$.trueList = makelist(nextquad());
+    $$.falseList = makelist(nextquad() + 1);
+    emit("if " + $1.var + " < " + $3.var + " goto");
+    emit("goto");
+    $$.code = $1.code + $3.code;
+}
+
+BoolFactor : Expr GT Expr {
+    $$.trueList = makelist(nextquad());
+    $$.falseList = makelist(nextquad() + 1);
+    emit("if " + $1.var + " > " + $3.var + " goto");
+    emit("goto");
+    $$.code = $1.code + $3.code;
+}
+
+BoolFactor : Expr EQ Expr {
+    $$.trueList = makelist(nextquad());
+    $$.falseList = makelist(nextquad() + 1);
+    emit("if " + $1.var + " == " + $3.var + " goto");
+    emit("goto");
+    $$.code = $1.code + $3.code;
+}
+
+// 算术表达式
+Expr : Expr PLUS Term {
+    $$.var = newTemp();
+    emit($$.var + " = " + $1.var + " + " + $3.var);
+    $$.code = $1.code + $3.code;
+}
+
+Expr : Expr MINUS Term {
+    $$.var = newTemp();
+    emit($$.var + " = " + $1.var + " - " + $3.var);
+    $$.code = $1.code + $3.code;
+}
+
+Expr : Term {
+    $$.var = $1.var;
+    $$.code = $1.code;
+}
+
+Term : Term MUL Factor {
+    $$.var = newTemp();
+    emit($$.var + " = " + $1.var + " * " + $3.var);
+    $$.code = $1.code + $3.code;
+}
+
+Term : Term DIV Factor {
+    $$.var = newTemp();
+    emit($$.var + " = " + $1.var + " / " + $3.var);
+    $$.code = $1.code + $3.code;
+}
+
+Term : Factor {
+    $$.var = $1.var;
+    $$.code = $1.code;
+}
+
+Factor : LPAREN Expr RPAREN {
+    $$.var = $2.var;
+    $$.code = $2.code;
+}
+
+Factor : ID {
+    $$.var = $1.text;
+    $$.code = "";
+}
+
+Factor : NUM {
+    $$.var = $1.text;
+    $$.code = "";
 }

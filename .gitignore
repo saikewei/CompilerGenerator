@@ -363,3 +363,4 @@ MigrationBackup/
 FodyWeavers.xsd
 /EmitterTest/output
 /Report
+/CompilerGenerator/output

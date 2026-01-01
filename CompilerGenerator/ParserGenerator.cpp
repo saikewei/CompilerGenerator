@@ -46,13 +46,13 @@ void ParserGenerator::build() {
 		computeFirstSets(nonterminals, terminals,productions);
 
 	//增广
-	auto augmentedProductions = buildAugmentedProductions(startSymbol,productions);
+	this->augmentedProductions = buildAugmentedProductions(startSymbol,productions);
 
 	//构建LR(1)项目集组
-	auto itemSets = buildLR1ItemSets(augmentedProductions, first);
+	auto itemSets = buildLR1ItemSets(this->augmentedProductions, first);
 
 	//构建LR(1)预测分析表
-	buildLR1ParsingTable(nonterminals, terminals,itemSets, augmentedProductions, actionTable, gotoTable);
+	buildLR1ParsingTable(nonterminals, terminals,itemSets, this->augmentedProductions, actionTable, gotoTable);
 }
 
 const ActionTable& ParserGenerator::getActionTable() const {
@@ -64,7 +64,7 @@ const GotoTable& ParserGenerator::getGotoTable() const {
 }
 
 const std::vector<ProductionRule>& ParserGenerator::getRules() const {
-    return this->productions;
+    return this->augmentedProductions;
 }
 
 

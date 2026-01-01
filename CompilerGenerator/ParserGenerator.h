@@ -58,6 +58,8 @@ public:
 private:
     std::string startSymbol;
     std::vector<ProductionRule> productions;
+	// 增广之后的产生式列表
+    std::vector<ProductionRule> augmentedProductions;
     ActionTable actionTable;
     GotoTable gotoTable;
 

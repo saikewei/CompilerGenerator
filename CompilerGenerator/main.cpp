@@ -23,7 +23,7 @@ int main(int argc, char *argv[])
     // ---------------------------------------------------------
     std::cout << "[Step 1] Parsing rule file: " << filename << "..." << std::endl;
 
-    CodeEmitter emitter;
+    CodeEmitter emitter("output");
     std::vector<TokenDefinition> tokenDefs;
     std::vector<ProductionRule> grammarRules;
 
