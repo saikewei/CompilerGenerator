@@ -101,13 +101,37 @@ bool CodeEmitter::parseInputFile(const std::string& filepath,
     // ==========================================
     std::stringstream ssLex(lexSection);
     std::string line;
-    while (std::getline(ssLex, line)) {
-        line = trim(line);
-        if (line.empty() || line.rfind("//", 0) == 0) continue;
 
-        std::stringstream ssLine(line);
-        std::string pattern, name;
-        ssLine >> pattern >> name; // 简单的空格分割
+    while (std::getline(ssLex, line)) {
+        // 去掉注释
+        auto commentPos = line.find("//");
+        if (commentPos != std::string::npos) {
+            line = line.substr(0, commentPos);
+        }
+
+        line = trim(line);
+        if (line.empty()) continue;
+
+        // 从行尾解析 token 名
+        size_t end = line.size();
+        size_t pos = end;
+
+        // 跳过行尾空白
+        while (pos > 0 && std::isspace(line[pos - 1])) {
+            --pos;
+        }
+
+        // 找 token 名起始
+        size_t nameEnd = pos;
+        while (pos > 0 && !std::isspace(line[pos - 1])) {
+            --pos;
+        }
+
+        size_t nameStart = pos;
+
+        std::string name = line.substr(nameStart, nameEnd - nameStart);
+        std::string pattern = trim(line.substr(0, nameStart));
+
         if (!pattern.empty() && !name.empty()) {
             outTokens.push_back({ name, pattern });
         }
@@ -232,6 +256,7 @@ bool CodeEmitter::emitLexer(const DFATable& dfa) {
             // 处理特殊字符转义
             if (key == '\n') ssSwitch << "(c == '\\n') ";
             else if (key == '\t') ssSwitch << "(c == '\\t') ";
+			else if (key == '\r') ssSwitch << "(c == '\\r') ";
             else ssSwitch << "(c == '" << key << "') ";
 
             ssSwitch << "nextState = " << target << ";\n";
