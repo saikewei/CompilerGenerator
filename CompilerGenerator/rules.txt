@@ -6,8 +6,8 @@ while           WHILE
 if              IF
 else            ELSE
 print           PRINT
-[0-9]+          NUM
-[a-zA-Z_]+      ID
+\|\|            OR
+&&              AND
 \+              PLUS
 \-              MINUS
 \*              MUL
@@ -21,6 +21,8 @@ print           PRINT
 \{              LBRACE
 \}              RBRACE
 ;               SEMI
+[0-9]+          NUM
+[a-zA-Z_]+      ID
 [ \t\n\r]+      SKIP   // 忽略空白符
 
 %%

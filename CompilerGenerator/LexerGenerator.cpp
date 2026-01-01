@@ -21,56 +21,70 @@ std::string LexerGenerator::preprocessRegex(const std::string& regex) {
     std::string result;
     bool inCharClass = false;
     bool escape = false;
-    
+
     for (size_t i = 0; i < regex.length(); ++i) {
         char c = regex[i];
-        
+
         if (escape) {
-            // 处理转义字符
+            // 给转义字符加一个特殊前缀，避免在后缀转换时混淆
+            // 这里我们暂且直接存入，但在后缀处理时要小心
             if (c == 'n') result += '\n';
             else if (c == 't') result += '\t';
             else if (c == 'r') result += '\r';
             else result += c;
+
+            // 关键：如果在字符类内，每加一个项都要跟一个 |
+            if (inCharClass) result += '|';
+
             escape = false;
         }
         else if (c == '\\') {
-            escape = true;
+            escape = true; // 下一轮循环处理
+            // 注意：为了让 regexToPostfix 区分字面量 '+' 和运算符 '+'，
+            // 严谨的做法是在这里插入一个特殊标记，或者在 result 中保留转义符。
+            // 为了最小化改动，建议让 regexToPostfix 也支持转义，见下文。
+            result += '\\';
         }
         else if (c == '[' && !inCharClass) {
-            // 开始字符类
             inCharClass = true;
             result += '(';
         }
         else if (c == ']' && inCharClass) {
-            // 结束字符类，转换为选择表达式
             inCharClass = false;
-            // 字符类会在后续处理中展开
+            // 移除末尾多余的 '|'
+            if (result.back() == '|') result.pop_back();
             result += ')';
         }
         else if (inCharClass) {
-            // 在字符类内部
             if (c == '-' && i > 0 && i + 1 < regex.length()) {
-                // 处理范围，如 [0-9] -> (0|1|2|3|4|5|6|7|8|9)
+                // 处理范围 [a-z]
                 char start = regex[i - 1];
                 char end = regex[i + 1];
-                result.pop_back(); // 移除刚添加的起始字符
+
+                // 因为我们在添加 start 时多加了一个 '|'，需要先弹出来
+                if (result.back() == '|') result.pop_back();
+                // 弹出 start 字符本身，因为我们要重新构建范围序列
+                result.pop_back();
+
                 result += '(';
                 for (char ch = start; ch <= end; ++ch) {
                     result += ch;
                     if (ch < end) result += '|';
                 }
                 result += ')';
+
                 i++; // 跳过结束字符
             }
             else {
                 result += c;
             }
+            // 字符类内，每添加一个元素后加 '|'
+            result += '|';
         }
         else {
             result += c;
         }
     }
-    
     return result;
 }
 
@@ -78,35 +92,66 @@ std::string LexerGenerator::preprocessRegex(const std::string& regex) {
 std::string LexerGenerator::regexToPostfix(const std::string& regex) {
     std::string postfix;
     std::stack<char> opStack;
-    
-    // 运算符优先级
+    bool escape = false; // 新增状态
+
     auto precedence = [](char op) -> int {
         if (op == '*') return 3;
         if (op == '+') return 3;
         if (op == '?') return 3;
         if (op == '|') return 1;
-        if (op == '.') return 2;  // 连接运算符
+        if (op == '.') return 2;
         return 0;
-    };
-    
-    // 添加显式的连接运算符
+        };
+
+    // 1. 添加显式连接符 '.'
     std::string withConcat;
     for (size_t i = 0; i < regex.length(); ++i) {
         char c = regex[i];
+
+        // 处理转义：如果遇到斜杠，直接把斜杠和下一个字符都加进去，不加连接符逻辑
+        if (c == '\\') {
+            withConcat += c;
+            if (i + 1 < regex.length()) {
+                withConcat += regex[i + 1];
+                i++; // 跳过下一个字符
+            }
+            // 判断是否需要追加连接符 (转义序列视为一个整体操作数)
+            if (i + 1 < regex.length()) {
+                char next = regex[i + 1];
+                if (next != ')' && next != '*' && next != '+' && next != '?' && next != '|' && next != '.') {
+                    withConcat += '.';
+                }
+            }
+            continue;
+        }
+
         withConcat += c;
-        
         if (i + 1 < regex.length()) {
             char next = regex[i + 1];
-            // 需要添加连接运算符的情况
-            if ((c != '(' && c != '|') && (next != ')' && next != '*' && next != '+' && next != '?' && next != '|')) {
-                withConcat += '.';  // 隐式连接运算符
+            bool isOp = (c == '(' || c == '|' || c == '.');
+            // 注意：现在 c 可能是字符类展开后的 '(' 或 ')'，要小心判断
+
+            bool nextIsOp = (next == ')' || next == '*' || next == '+' || next == '?' || next == '|' || next == '.');
+
+            if (!isOp && !nextIsOp) {
+                withConcat += '.';
             }
         }
     }
-    
-    // 转换为后缀表达式
-    for (char c : withConcat) {
-        if (isalnum(c) || c == '\\' || c == '\n' || c == '\t' || c == '\r') {
+
+    // 2. 转换为后缀
+    for (size_t i = 0; i < withConcat.length(); ++i) {
+        char c = withConcat[i];
+
+        if (c == '\\') {
+            // 遇到转义符，直接把下一个字符当作普通操作数加入后缀
+            if (i + 1 < withConcat.length()) {
+                postfix += withConcat[i + 1];
+                i++;
+            }
+        }
+        // 修改：允许下划线 _ 和其他符号作为操作数
+        else if (isalnum(c) || c == '_' || c == '=' || c == '<' || c == '>' || c == ';' || c == '{' || c == '}' || c == ' ' || c == '\n' || c == '\t' || c == '\r') {
             postfix += c;
         }
         else if (c == '(') {
@@ -122,19 +167,18 @@ std::string LexerGenerator::regexToPostfix(const std::string& regex) {
         else {
             // 运算符
             while (!opStack.empty() && opStack.top() != '(' &&
-                   precedence(opStack.top()) >= precedence(c)) {
+                precedence(opStack.top()) >= precedence(c)) {
                 postfix += opStack.top();
                 opStack.pop();
             }
             opStack.push(c);
         }
     }
-    
+
     while (!opStack.empty()) {
         postfix += opStack.top();
         opStack.pop();
     }
-    
     return postfix;
 }
 
