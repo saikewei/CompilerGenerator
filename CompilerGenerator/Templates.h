@@ -77,7 +77,7 @@ Token Lexer::nextToken() {
         auto matchOneToken = [&]() -> Token {
             // EOF 检查
             if (m_pos >= m_source.length()) {
-                return Token{"EOF", "", m_line};
+                return Token{"#", "", m_line};
             }
 
             int state = 0;       // 初始状态

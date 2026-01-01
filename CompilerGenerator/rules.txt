@@ -31,167 +31,138 @@ print           PRINT
 // Part 2: Syntax Rules (语法规则)
 // ==========================================
 
-// 程序由一系列语句组成
 Program : StmtList {
-    $$.code = $1.code;
 }
 
-// 语句列表
-StmtList : StmtList Stmt {
-    $$.code = $1.code + $2.code;
+M : {
+    $$.quad = nextquad();
+}
+
+N : {
+    $$.nextList = makelist(nextquad());
+    emit("goto ");
+}
+
+StmtList : StmtList M Stmt {
+    backpatch($1.nextList, $2.quad);
+    $$.nextList = $3.nextList;
 }
 
 StmtList : Stmt {
-    $$.code = $1.code;
+    $$.nextList = $1.nextList;
 }
 
-// 语句类型：赋值、if、while、print、复合语句
 Stmt : ID ASSIGN Expr SEMI {
     emit($1.text + " = " + $3.var);
-    $$.code = $3.code;
+    $$.nextList = {};
 }
 
-Stmt : IF LPAREN BoolExpr RPAREN M1 Stmt M2 ELSE M3 Stmt {
+Stmt : IF LPAREN BoolExpr RPAREN M Stmt N ELSE M Stmt {
     backpatch($3.trueList, $5.quad);
     backpatch($3.falseList, $9.quad);
     $$.nextList = merge(merge($6.nextList, $7.nextList), $10.nextList);
-    $$.code = $3.code + $6.code + "goto " + std::to_string($7.quad) + "\n" + $10.code;
 }
 
-Stmt : IF LPAREN BoolExpr RPAREN M1 Stmt {
+Stmt : IF LPAREN BoolExpr RPAREN M Stmt {
     backpatch($3.trueList, $5.quad);
     $$.nextList = merge($3.falseList, $6.nextList);
-    $$.code = $3.code + $6.code;
 }
 
-Stmt : WHILE M1 LPAREN BoolExpr RPAREN M2 Stmt {
+Stmt : WHILE M LPAREN BoolExpr RPAREN M Stmt {
     backpatch($7.nextList, $2.quad);
     backpatch($4.trueList, $6.quad);
     $$.nextList = $4.falseList;
     emit("goto " + std::to_string($2.quad));
-    $$.code = $4.code + $7.code;
 }
 
 Stmt : PRINT LPAREN Expr RPAREN SEMI {
     emit("print " + $3.var);
-    $$.code = $3.code;
+    $$.nextList = {};
 }
 
 Stmt : LBRACE StmtList RBRACE {
-    $$.code = $2.code;
     $$.nextList = $2.nextList;
 }
 
-// 标记非终结符 M (记录代码位置)
-M1 : {
-    $$.quad = nextquad();
-}
-
-M2 : {
-    $$.quad = nextquad();
-}
-
-M3 : {
-    $$.quad = nextquad();
-}
-
-// 布尔表达式（用于条件判断）
-BoolExpr : BoolExpr OR M1 BoolTerm {
+BoolExpr : BoolExpr OR M BoolTerm {
     backpatch($1.falseList, $3.quad);
     $$.trueList = merge($1.trueList, $4.trueList);
     $$.falseList = $4.falseList;
-    $$.code = $1.code + $4.code;
 }
 
 BoolExpr : BoolTerm {
     $$.trueList = $1.trueList;
     $$.falseList = $1.falseList;
-    $$.code = $1.code;
 }
 
-BoolTerm : BoolTerm AND M1 BoolFactor {
+BoolTerm : BoolTerm AND M BoolFactor {
     backpatch($1.trueList, $3.quad);
     $$.trueList = $4.trueList;
     $$.falseList = merge($1.falseList, $4.falseList);
-    $$.code = $1.code + $4.code;
 }
 
 BoolTerm : BoolFactor {
     $$.trueList = $1.trueList;
     $$.falseList = $1.falseList;
-    $$.code = $1.code;
 }
 
 BoolFactor : Expr LT Expr {
     $$.trueList = makelist(nextquad());
     $$.falseList = makelist(nextquad() + 1);
-    emit("if " + $1.var + " < " + $3.var + " goto");
-    emit("goto");
-    $$.code = $1.code + $3.code;
+    emit("if " + $1.var + " < " + $3.var + " goto ");
+    emit("goto ");
 }
 
 BoolFactor : Expr GT Expr {
     $$.trueList = makelist(nextquad());
     $$.falseList = makelist(nextquad() + 1);
-    emit("if " + $1.var + " > " + $3.var + " goto");
-    emit("goto");
-    $$.code = $1.code + $3.code;
+    emit("if " + $1.var + " > " + $3.var + " goto ");
+    emit("goto ");
 }
 
 BoolFactor : Expr EQ Expr {
     $$.trueList = makelist(nextquad());
     $$.falseList = makelist(nextquad() + 1);
-    emit("if " + $1.var + " == " + $3.var + " goto");
-    emit("goto");
-    $$.code = $1.code + $3.code;
+    emit("if " + $1.var + " == " + $3.var + " goto ");
+    emit("goto ");
 }
 
-// 算术表达式
 Expr : Expr PLUS Term {
     $$.var = newTemp();
     emit($$.var + " = " + $1.var + " + " + $3.var);
-    $$.code = $1.code + $3.code;
 }
 
 Expr : Expr MINUS Term {
     $$.var = newTemp();
     emit($$.var + " = " + $1.var + " - " + $3.var);
-    $$.code = $1.code + $3.code;
 }
 
 Expr : Term {
     $$.var = $1.var;
-    $$.code = $1.code;
 }
 
 Term : Term MUL Factor {
     $$.var = newTemp();
     emit($$.var + " = " + $1.var + " * " + $3.var);
-    $$.code = $1.code + $3.code;
 }
 
 Term : Term DIV Factor {
     $$.var = newTemp();
     emit($$.var + " = " + $1.var + " / " + $3.var);
-    $$.code = $1.code + $3.code;
 }
 
 Term : Factor {
     $$.var = $1.var;
-    $$.code = $1.code;
 }
 
 Factor : LPAREN Expr RPAREN {
     $$.var = $2.var;
-    $$.code = $2.code;
 }
 
 Factor : ID {
     $$.var = $1.text;
-    $$.code = "";
 }
 
 Factor : NUM {
     $$.var = $1.text;
-    $$.code = "";
 }
