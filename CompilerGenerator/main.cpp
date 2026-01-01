@@ -88,10 +88,6 @@ int main(int argc, char *argv[])
     // ---------------------------------------------------------
     std::cout << "[Step 4] Emitting Target C++ Code..." << std::endl;
 
-    // 定义输出文件名
-    std::string lexOutFile = "lex.cpp";
-    std::string parserOutFile = "parser.cpp";
-
     // 生成 lex.cpp
     if (!emitter.emitLexer(lexGen.getDFATable()))
     {
@@ -110,9 +106,7 @@ int main(int argc, char *argv[])
     }
 
     std::cout << "============================================" << std::endl;
-    std::cout << "   Success! Generated files:" << std::endl;
-    std::cout << "   1. " << lexOutFile << std::endl;
-    std::cout << "   2. " << parserOutFile << std::endl;
+    std::cout << "   Success! Files generated!" << std::endl;
     std::cout << "============================================" << std::endl;
 
     return 0;
