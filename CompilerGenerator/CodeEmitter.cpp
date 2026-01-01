@@ -335,7 +335,20 @@ bool CodeEmitter::emitParser(const ActionTable& actionTbl,
             const ProductionRule& rule = rules[action.target];
             int rhsCount = (int)rule.rhs.size();
 
-            ssAction << "            // Reduce Rule " << rule.id << ": " << rule.lhs << " -> ...\n";
+            // --- 新增：构造易读的产生式字符串 ---
+            std::string ruleDisp = rule.lhs + " -> ";
+            if (rule.rhs.empty()) {
+                ruleDisp += "ε"; // 处理空产生式
+            }
+            else {
+                for (size_t i = 0; i < rule.rhs.size(); ++i) {
+                    ruleDisp += rule.rhs[i] + (i == rule.rhs.size() - 1 ? "" : " ");
+                }
+            }
+
+            // 在生成的代码中添加打印语句
+            ssAction << "            // Reduce Rule " << rule.id << ": " << ruleDisp << "\n";
+            ssAction << "            std::cout << \"[Reduce] " << ruleDisp << "\" << std::endl;\n";
 
             // 2. 生成弹栈代码
             for (int i = rhsCount; i >= 1; --i) {

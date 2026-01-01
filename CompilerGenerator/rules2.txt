@@ -1,0 +1,52 @@
+// ==========================================
+// Part 1: Lexical Rules
+// ==========================================
+func            FUNC
+return          RETURN
+[a-zA-Z_]+      ID
+[0-9]+          NUM
+\(              LPAREN
+\)              RPAREN
+\{              LBRACE
+\}              RBRACE
+,               COMMA
+=               ASSIGN
+;               SEMI
+[ \t\n\r]+      SKIP
+
+%%
+
+// ==========================================
+// Part 2: Syntax Rules
+// ==========================================
+
+Program : FuncList {}
+
+FuncList : FuncList FuncDef {}
+FuncList : FuncDef {}
+
+// 函数定义: func name(arg) { ... }
+FuncDef : FUNC ID LPAREN ID RPAREN LBRACE StmtList RBRACE {
+    emit("begin_func " + $2.text + ", param=" + $4.text);
+    // 这里假设 StmtList 已经 emit 了中间代码
+    emit("end_func");
+}
+
+StmtList : StmtList Stmt {}
+StmtList : Stmt {}
+
+// 返回语句
+Stmt : RETURN Expr SEMI {
+    emit("ret " + $2.var);
+}
+
+// 赋值包含调用: x = call f(y);
+Stmt : ID ASSIGN ID LPAREN Expr RPAREN SEMI {
+    emit("param " + $5.var);
+    $$.var = newTemp();
+    emit($$.var + " = call " + $3.text);
+    emit($1.text + " = " + $$.var);
+}
+
+Expr : NUM { $$.var = $1.text; }
+Expr : ID { $$.var = $1.text; }
